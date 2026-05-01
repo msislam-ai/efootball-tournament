@@ -972,13 +972,13 @@ function TournamentSection({ matches }) {
 // ─────────────────────────────────────────────────────────────
 // ADMIN SECTION
 // ─────────────────────────────────────────────────────────────
-const ADMIN_PASSWORD = "admin2025";
+const ADMIN_PASSWORD = "adminadmin2026";
 function AdminSection({ matches, players, onUpdateMatch, onAddMatch, onDeleteMatch }) {
   const [authed, setAuthed] = useState(false);
   const [pw, setPw] = useState('');
   const [pwErr, setPwErr] = useState('');
   const [newMatch, setNewMatch] = useState({player1:'',player2:'',round:'Group Stage'});
-  const login = () => { if(pw===ADMIN_PASSWORD){setAuthed(true);setPwErr('');}else setPwErr('Wrong password. Default: admin2025'); };
+  const login = () => { if(pw===ADMIN_PASSWORD){setAuthed(true);setPwErr('');}else setPwErr('Wrong password. '); };
 
   if (!authed) return (
     <div className="admin-login">
@@ -988,7 +988,7 @@ function AdminSection({ matches, players, onUpdateMatch, onAddMatch, onDeleteMat
       <input className="admin-pw-input" type="password" placeholder="••••••••••" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==='Enter'&&login()} />
       {pwErr && <div style={{color:'var(--lr)',fontSize:'.72rem',marginBottom:'.5rem'}}>{pwErr}</div>}
       <button className="btn-submit" style={{margin:0}} onClick={login}>Unlock Panel</button>
-      <div style={{color:'var(--tm)',fontSize:'.68rem',marginTop:'.6rem'}}>Default: admin2025</div>
+      <div style={{color:'var(--tm)',fontSize:'.68rem',marginTop:'.6rem'}}>only for organizers</div>
     </div>
   );
 
