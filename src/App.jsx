@@ -510,7 +510,7 @@ body{font-family:'Exo 2',sans-serif;background:var(--dbg);color:var(--tp);min-he
 @media(max-width:700px){
   .nav-tabs-desktop{display:none}
   .ham-btn{display:flex}
-  .drawer-overlay{display:block}
+  .drawer-overlay{display:none}
 }
 
 /* ≤ 520px: also show bottom nav bar */
