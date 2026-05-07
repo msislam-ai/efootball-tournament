@@ -15,7 +15,7 @@ const app = initializeApp(FIREBASE_CONFIG);
 const db = getFirestore(app);
 
 const DEMO_MODE = false;
-const TOURNAMENT_CLOSE_DATE = new Date("2026-05-05T18:00:00+06:00");
+const TOURNAMENT_CLOSE_DATE = new Date("2026-05-20T18:00:00+06:00");
 
 const DEMO_PLAYERS = [
   { id:"p1", name:"Ahmed Hassan", studentId:"U2021001", email:"ahmed@univ.edu", phone:"01712345678", bkash:"01712345678", transactionId:"TXN001", teamName:"FC Dhaka" },
