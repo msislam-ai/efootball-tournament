@@ -20,13 +20,13 @@ import {
 // ─── FIREBASE CONFIG ──────────────────────────────────────────────────────────
 // Replace with your Firebase project config from https://console.firebase.google.com
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
-  databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyBykX8A_F8L0JuM4oPHG1gWUWxv-9uHGfo",
+  authDomain: "mango-marketplace-bangladesh.firebaseapp.com",
+  databaseURL: "https://mango-marketplace-bangladesh-default-rtdb.firebaseio.com/",
+  projectId: "mango-marketplace-bangladesh",
+  storageBucket: "mango-marketplace-bangladesh.firebasestorage.app",
+  messagingSenderId: "406360686534",
+  appId: "1:406360686534:web:94dbb88ad96bda7fb97cc7"
 };
 
 const ADMIN_EMAIL = "admin@mangogrove.com"; // Change to your admin email
