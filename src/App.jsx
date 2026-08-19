@@ -921,7 +921,7 @@ function GroupStandings({ matches }) {
         : (
           <div className="table-scroll">
             <table className="leaderboard-table">
-              <thead><tr><th>#</th><th>Player</th><th>MP</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr></thead>
+              <thead><tr><th>#</th><th>Player</th><th>MP</th><th>W</th><th>D</th><th>L</th><th>GF</th><th>GD</th><th>Pts</th></tr></thead>
               <tbody>
                 {table.map((p,i) => (
                   <tr key={p.name}>
@@ -931,6 +931,7 @@ function GroupStandings({ matches }) {
                     <td><span className="lb-num">{p.wins}</span></td>
                     <td><span className="lb-num">{p.draws}</span></td>
                     <td><span className="lb-num">{p.losses}</span></td>
+                    <td><span className="lb-num">{p.gf}</span></td>
                     <td><span className="lb-num">{p.gf-p.ga>0?'+':''}{p.gf-p.ga}</span></td>
                     <td><span className="lb-num lb-points">{p.points}</span></td>
                   </tr>
