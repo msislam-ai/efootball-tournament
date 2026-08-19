@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, onSnapshot, doc, updateDoc, deleteDoc, addDoc } from 'firebase/firestore';
+import { getFirestore, collection, onSnapshot, doc, updateDoc, deleteDoc, addDoc, setDoc } from 'firebase/firestore';
 
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDvrtHjZ1zU2d1X6LBtmieu7hGIY3irS74",
@@ -19,16 +19,33 @@ const DEMO_MODE = false;
 // ── Change this date to your real tournament registration close date ──
 const TOURNAMENT_CLOSE_DATE = new Date("2026-08-18T18:10:00+06:00");
 
+// ── Tournament stage order. These strings match the existing `round`
+// field values already stored on your finished matches, so nothing in
+// Firebase needs to be renamed. "Round of 12" is the one new stage. ──
+const ROUND_ORDER = ["Group Stage", "Round of 12", "Quarter Final", "Semi Final", "Final"];
+const KNOCKOUT_ROUNDS = ROUND_ORDER.slice(1); // everything after Group Stage
+
+function nextRoundOf(round) {
+  const i = ROUND_ORDER.indexOf(round);
+  return i >= 0 && i < ROUND_ORDER.length - 1 ? ROUND_ORDER[i + 1] : null;
+}
+function stageIndex(stage) {
+  if (stage === "Completed") return ROUND_ORDER.length;
+  const i = ROUND_ORDER.indexOf(stage);
+  return i < 0 ? 0 : i;
+}
+
 const DEMO_PLAYERS = [
   { id:"p1", name:"Ahmed Hassan", studentId:"U2021001", email:"ahmed@univ.edu", phone:"01712345678", bkash:"01712345678", transactionId:"TXN001", teamName:"FC Dhaka" },
   { id:"p2", name:"Rahim Uddin",  studentId:"U2021002", email:"rahim@univ.edu",  phone:"01812345679", bkash:"01812345679", transactionId:"",       teamName:"Tigers FC" },
 ];
 const DEMO_MATCHES = [
-  { id:"m1", player1:"Ahmed Hassan", player2:"Rahim Uddin",  score1:2, score2:1, status:"finished", round:"Quarter Final" },
-  { id:"m2", player1:"Karim Islam",  player2:"Sabbir Khan",  score1:1, score2:1, status:"live",     round:"Quarter Final" },
-  { id:"m3", player1:"TBD",          player2:"TBD",          score1:0, score2:0, status:"upcoming", round:"Semi Final" },
+  { id:"m1", player1:"Ahmed Hassan", player2:"Rahim Uddin",  score1:2, score2:1, status:"finished", round:"Group Stage" },
+  { id:"m2", player1:"Karim Islam",  player2:"Sabbir Khan",  score1:1, score2:1, status:"live",     round:"Round of 12" },
+  { id:"m3", player1:"TBD",          player2:"TBD",          score1:0, score2:0, status:"upcoming", round:"Quarter Final" },
   { id:"m4", player1:"TBD",          player2:"TBD",          score1:0, score2:0, status:"upcoming", round:"Final" },
 ];
+const DEMO_META = { currentStage: "Round of 12" };
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 const pad = n => String(n).padStart(2,'0');
@@ -58,6 +75,10 @@ function useMatchTimer(isLive) {
   return `${String(Math.floor(secs/60)).padStart(2,'0')}:${String(secs%60).padStart(2,'0')}`;
 }
 
+function initials(name) {
+  return (name||'?').split(' ').map(w=>w[0]||'').join('').slice(0,2).toUpperCase();
+}
+
 // ── Styles ────────────────────────────────────────────────────────────────
 const styles = `
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Exo+2:wght@300;400;500;600&display=swap');
@@ -65,17 +86,18 @@ const styles = `
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 
 :root {
-  --ng:#00ff87; --nb:#00cfff; --np:#b347ff; --lr:#ff2d55;
+  --ng:#00ff87; --nb:#00cfff; --np:#b347ff; --lr:#ff2d55; --gold:#ffd700;
   --dbg:#060810; --dc:#0d1117; --dbo:#1a2332; --ds:#111827;
   --tp:#e8f4ff; --ts:#7a8fa6; --tm:#3d5166;
   --gg:0 0 20px rgba(0,255,135,.4),0 0 60px rgba(0,255,135,.15);
   --gb:0 0 20px rgba(0,207,255,.4),0 0 60px rgba(0,207,255,.15);
   --gp:0 0 20px rgba(179,71,255,.4),0 0 60px rgba(179,71,255,.15);
+  --ggold:0 0 20px rgba(255,215,0,.4),0 0 60px rgba(255,215,0,.15);
 }
 
 body { font-family:'Exo 2',sans-serif; background:var(--dbg); color:var(--tp); min-height:100vh; overflow-x:hidden; }
 
-::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar{width:5px;height:5px}
 ::-webkit-scrollbar-track{background:var(--dc)}
 ::-webkit-scrollbar-thumb{background:var(--nb);border-radius:3px}
 
@@ -117,10 +139,10 @@ body { font-family:'Exo 2',sans-serif; background:var(--dbg); color:var(--tp); m
 /* ── MAIN ── */
 .main{position:relative;z-index:2}
 
-/* ── LANDING ── */
+/* ── HERO / LANDING ── */
 .landing{
   min-height:calc(100vh - 54px);display:flex;flex-direction:column;
-  align-items:center;justify-content:center;padding:2rem 1rem;text-align:center;gap:1.75rem;
+  align-items:center;justify-content:center;padding:2.5rem 1rem 2rem;text-align:center;gap:1.5rem;
 }
 .badge{
   display:inline-flex;align-items:center;gap:.45rem;padding:.3rem .95rem;border-radius:999px;
@@ -128,6 +150,7 @@ body { font-family:'Exo 2',sans-serif; background:var(--dbg); color:var(--tp); m
 }
 .badge.green{border-color:var(--ng);color:var(--ng);background:rgba(0,255,135,.08)}
 .badge.red{border-color:var(--lr);color:var(--lr);background:rgba(255,45,85,.1);animation:pb 1.5s ease-in-out infinite}
+.badge.gold{border-color:var(--gold);color:var(--gold);background:rgba(255,215,0,.08)}
 @keyframes pb{0%,100%{opacity:1}50%{opacity:.6}}
 
 .main-title{
@@ -141,13 +164,61 @@ body { font-family:'Exo 2',sans-serif; background:var(--dbg); color:var(--tp); m
   font-family:'Orbitron',monospace;font-size:clamp(.65rem,1.8vw,.95rem);
   letter-spacing:.3em;color:var(--np);text-transform:uppercase;font-weight:600;
 }
+
+.stage-callout{
+  font-family:'Orbitron',monospace;letter-spacing:.1em;text-transform:uppercase;
+  color:#fff;font-size:clamp(.85rem,2.2vw,1.15rem);font-weight:700;
+  padding:.5rem 1.35rem;border-radius:8px;background:rgba(0,207,255,.08);border:1px solid rgba(0,207,255,.3);
+}
+
+/* Progress steps */
+.progress-track{display:flex;align-items:center;justify-content:center;gap:0;flex-wrap:wrap;max-width:720px;margin:0 auto}
+.progress-step{display:flex;flex-direction:column;align-items:center;gap:.4rem;min-width:88px}
+.progress-dot{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.65rem;font-family:'Orbitron',monospace;border:2px solid var(--dbo);color:var(--tm);background:var(--dc);flex-shrink:0}
+.progress-step.done .progress-dot{border-color:var(--ng);color:var(--ng);background:rgba(0,255,135,.08)}
+.progress-step.live .progress-dot{border-color:var(--lr);color:var(--lr);background:rgba(255,45,85,.12);animation:pb 1.4s infinite}
+.progress-step.upcoming .progress-dot{border-color:var(--dbo);color:var(--tm)}
+.progress-label{font-family:'Orbitron',monospace;font-size:.55rem;letter-spacing:.08em;color:var(--ts);text-transform:uppercase;white-space:nowrap}
+.progress-step.done .progress-label{color:var(--ng)}
+.progress-step.live .progress-label{color:var(--lr)}
+.progress-connector{width:28px;height:2px;background:var(--dbo);margin:0 2px;align-self:flex-start;margin-top:10px}
+.progress-connector.done{background:var(--ng)}
+
+/* Hero live/next preview */
+.hero-preview{
+  width:100%;max-width:480px;background:var(--dc);border:1px solid var(--dbo);border-radius:12px;
+  padding:1.1rem 1.25rem;text-align:left;
+}
+.hero-preview-label{font-family:'Orbitron',monospace;font-size:.6rem;letter-spacing:.15em;color:var(--ts);text-transform:uppercase;margin-bottom:.6rem;display:flex;align-items:center;gap:.4rem}
+.hero-preview-row{display:flex;align-items:center;justify-content:space-between;gap:.75rem}
+.hero-preview-name{font-family:'Orbitron',monospace;font-size:.78rem;font-weight:700;color:#fff;text-transform:uppercase}
+.hero-preview-score{font-family:'Orbitron',monospace;font-weight:900;font-size:1.4rem;color:#fff}
+.hero-preview-empty{color:var(--tm);font-size:.8rem;text-align:center;padding:.5rem}
+
+.hero-cta-row{display:flex;gap:.75rem;flex-wrap:wrap;justify-content:center}
+.btn-cta{
+  padding:.7rem 1.5rem;font-family:'Orbitron',monospace;font-weight:700;font-size:.7rem;
+  letter-spacing:.1em;text-transform:uppercase;border-radius:6px;cursor:pointer;transition:all .25s;
+  border:1px solid var(--dbo);background:transparent;color:var(--tp);
+}
+.btn-cta.primary{background:linear-gradient(135deg,var(--ng),var(--nb));color:#000;border:none;box-shadow:var(--gg)}
+.btn-cta.primary:hover{transform:scale(1.04)}
+.btn-cta:not(.primary):hover{border-color:var(--nb);color:var(--nb)}
+
+.champion-banner{
+  padding:1.5rem 2rem;border-radius:14px;background:rgba(255,215,0,.06);border:1px solid rgba(255,215,0,.35);
+  box-shadow:var(--ggold);text-align:center;
+}
+.champion-trophy{font-size:2.5rem;margin-bottom:.5rem}
+.champion-name{font-family:'Orbitron',monospace;font-weight:900;font-size:1.4rem;color:var(--gold);text-transform:uppercase;letter-spacing:.08em}
+
 .urgency{
   display:inline-flex;align-items:center;gap:.5rem;padding:.45rem 1.1rem;border-radius:6px;
   background:rgba(255,45,85,.1);border:1px solid rgba(255,45,85,.3);color:#ff6b7a;font-size:.78rem;font-weight:500;
 }
 .urgency-dot{width:6px;height:6px;border-radius:50%;background:var(--lr);animation:pb 1s infinite;flex-shrink:0}
 
-/* Countdown */
+/* Countdown (used on register tab now) */
 .countdown{display:flex;gap:1rem;align-items:center;flex-wrap:wrap;justify-content:center}
 .count-box{
   background:var(--dc);border:1px solid var(--dbo);border-radius:8px;
@@ -298,6 +369,10 @@ body { font-family:'Exo 2',sans-serif; background:var(--dbg); color:var(--tp); m
   border:1px solid rgba(0,207,255,.3);border-radius:4px;padding:.28rem .7rem;
   font-family:'Orbitron',monospace;font-size:.67rem;color:var(--nb);
 }
+.winner-tag{
+  display:inline-flex;align-items:center;gap:.3rem;font-family:'Orbitron',monospace;font-size:.6rem;
+  letter-spacing:.1em;color:var(--gold);text-transform:uppercase;margin-top:.3rem;
+}
 
 /* Match list */
 .matches-grid{display:flex;flex-direction:column;gap:.6rem;margin-bottom:1.75rem}
@@ -315,20 +390,37 @@ body { font-family:'Exo 2',sans-serif; background:var(--dbg); color:var(--tp); m
 .status-pill.upcoming{background:rgba(122,143,166,.12);color:var(--ts);border:1px solid var(--dbo)}
 .status-pill.live{background:rgba(255,45,85,.15);color:var(--lr);border:1px solid rgba(255,45,85,.3);animation:pb 1.5s infinite}
 .status-pill.finished{background:rgba(0,255,135,.1);color:var(--ng);border:1px solid rgba(0,255,135,.2)}
+.status-pill.postponed{background:rgba(255,165,0,.1);color:#ffa500;border:1px solid rgba(255,165,0,.25)}
+.status-pill.disputed{background:rgba(255,45,85,.12);color:var(--lr);border:1px solid rgba(255,45,85,.3)}
 
 /* Leaderboard */
 .leaderboard-card{background:var(--dc);border:1px solid var(--dbo);border-radius:12px;overflow:hidden;position:relative;margin-bottom:1.75rem}
 .leaderboard-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--ng),var(--nb))}
-.leaderboard-table{width:100%;border-collapse:collapse}
-.leaderboard-table th{font-family:'Orbitron',monospace;font-size:.58rem;letter-spacing:.15em;color:var(--ts);text-transform:uppercase;text-align:left;padding:.55rem .95rem;background:var(--ds);border-bottom:1px solid var(--dbo)}
+.leaderboard-table{width:100%;border-collapse:collapse;font-size:.8rem}
+.leaderboard-table th{font-family:'Orbitron',monospace;font-size:.55rem;letter-spacing:.12em;color:var(--ts);text-transform:uppercase;text-align:left;padding:.55rem .7rem;background:var(--ds);border-bottom:1px solid var(--dbo)}
 .leaderboard-table th:not(:first-child){text-align:center}
-.leaderboard-table td{padding:.7rem .95rem;border-bottom:1px solid rgba(26,35,50,.7);vertical-align:middle}
+.leaderboard-table td{padding:.65rem .7rem;border-bottom:1px solid rgba(26,35,50,.7);vertical-align:middle}
 .leaderboard-table tr:hover td{background:rgba(255,255,255,.018)}
 .rank-num{font-family:'Orbitron',monospace;font-weight:900;font-size:.88rem}
 .rank-1{color:#ffd700}.rank-2{color:#c0c0c0}.rank-3{color:#cd7f32}
-.lb-name{font-family:'Orbitron',monospace;font-size:.72rem;font-weight:600;color:var(--tp)}
-.lb-num{font-family:'Orbitron',monospace;font-size:.82rem;font-weight:700;text-align:center;color:var(--tp)}
-.lb-points{color:var(--ng);font-size:.95rem}
+.lb-name{font-family:'Orbitron',monospace;font-size:.7rem;font-weight:600;color:var(--tp)}
+.lb-num{font-family:'Orbitron',monospace;font-size:.78rem;font-weight:700;text-align:center;color:var(--tp)}
+.lb-points{color:var(--ng);font-size:.9rem}
+.table-scroll{overflow-x:auto}
+
+/* ── BRACKET ── */
+.bracket-scroll{display:flex;gap:1.25rem;overflow-x:auto;padding:.5rem .25rem 1.5rem;scroll-snap-type:x proximity}
+.bracket-col{min-width:230px;flex-shrink:0;scroll-snap-align:start;display:flex;flex-direction:column;gap:.9rem}
+.bracket-col-title{font-family:'Orbitron',monospace;font-size:.62rem;letter-spacing:.14em;color:var(--nb);text-transform:uppercase;text-align:center;padding-bottom:.4rem;border-bottom:1px solid var(--dbo)}
+.bracket-match{background:var(--dc);border:1px solid var(--dbo);border-radius:8px;padding:.75rem .85rem;position:relative}
+.bracket-match.live{border-color:rgba(255,45,85,.45);box-shadow:0 0 18px rgba(255,45,85,.1)}
+.bracket-match.finished{border-color:rgba(0,255,135,.25)}
+.bracket-match-num{font-size:.55rem;color:var(--tm);font-family:'Orbitron',monospace;letter-spacing:.08em;margin-bottom:.4rem}
+.bracket-player-row{display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.25rem 0}
+.bracket-player-row.winner .bracket-player-name{color:var(--gold)}
+.bracket-player-name{font-family:'Orbitron',monospace;font-size:.68rem;font-weight:600;color:var(--tp);text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px}
+.bracket-player-score{font-family:'Orbitron',monospace;font-size:.78rem;font-weight:900;color:#fff}
+.bracket-empty-col{color:var(--tm);font-size:.68rem;text-align:center;font-family:'Orbitron',monospace;padding:1rem 0}
 
 /* ── ADMIN ── */
 .admin-panel{padding:1.5rem 1rem;max-width:900px;margin:0 auto}
@@ -351,6 +443,9 @@ body { font-family:'Exo 2',sans-serif; background:var(--dbg); color:var(--tp); m
 .btn-action.finish{border-color:var(--ng);color:var(--ng);background:rgba(0,255,135,.08)}
 .btn-action.finish:hover{background:rgba(0,255,135,.2)}
 .btn-action.reset{border-color:var(--tm);color:var(--ts);background:transparent}
+.btn-action.postpone{border-color:#ffa500;color:#ffa500;background:rgba(255,165,0,.08)}
+.btn-action.dispute{border-color:var(--lr);color:var(--lr);background:rgba(255,45,85,.06)}
+.btn-action.gold{border-color:var(--gold);color:var(--gold);background:rgba(255,215,0,.08)}
 .btn-action:disabled{opacity:.35;cursor:not-allowed}
 .admin-add-match{padding:1.35rem;background:rgba(0,207,255,.04);border:1px dashed rgba(0,207,255,.2);border-radius:10px;margin-bottom:1.35rem}
 .add-match-grid{display:grid;grid-template-columns:1fr 1fr;gap:.85rem;margin-bottom:.85rem}
@@ -367,6 +462,14 @@ body { font-family:'Exo 2',sans-serif; background:var(--dbg); color:var(--tp); m
 .player-card-name{font-family:'Orbitron',monospace;font-size:.67rem;font-weight:700;color:var(--tp);margin-bottom:.22rem;text-transform:uppercase}
 .player-card-info{font-size:.67rem;color:var(--ts)}
 .empty-state{text-align:center;padding:2.5rem 1rem;color:var(--tm);font-family:'Orbitron',monospace;font-size:.72rem;letter-spacing:.1em}
+.admin-stage-bar{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;background:var(--dc);border:1px solid var(--dbo);border-radius:10px;padding:1rem 1.25rem;margin-bottom:1.5rem}
+.admin-stage-bar label{font-family:'Orbitron',monospace;font-size:.6rem;letter-spacing:.12em;color:var(--nb);text-transform:uppercase}
+.advance-row{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-top:.8rem;padding-top:.8rem;border-top:1px dashed var(--dbo)}
+.advance-row label{font-size:.62rem;color:var(--ts);font-family:'Orbitron',monospace;letter-spacing:.06em;text-transform:uppercase}
+.confirm-winner-row{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-top:.8rem;padding-top:.8rem;border-top:1px dashed rgba(255,215,0,.25)}
+.penalty-inputs{display:flex;align-items:center;gap:.4rem}
+.penalty-inputs input{width:42px;background:rgba(255,255,255,.03);border:1px solid var(--dbo);border-radius:4px;padding:.3rem;color:#fff;text-align:center;font-family:'Orbitron',monospace;font-size:.75rem}
+.winner-confirmed{font-family:'Orbitron',monospace;font-size:.65rem;color:var(--gold);letter-spacing:.08em;text-transform:uppercase;margin-top:.6rem}
 
 /* ── RESPONSIVE ── */
 @media(max-width:768px){
@@ -387,6 +490,9 @@ body { font-family:'Exo 2',sans-serif; background:var(--dbg); color:var(--tp); m
   .score-label{min-width:50px;font-size:.65rem}
   .admin-match-header{flex-direction:column;align-items:flex-start}
   .dashboard{padding:1rem .85rem}
+  .progress-step{min-width:64px}
+  .progress-connector{width:16px}
+  .progress-label{font-size:.48rem}
 }
 
 @media(max-width:480px){
@@ -399,85 +505,115 @@ body { font-family:'Exo 2',sans-serif; background:var(--dbg); color:var(--tp); m
   .urgency{font-size:.7rem;padding:.38rem .85rem}
   .form-card{padding:1.5rem 1.1rem}
   .form-title{font-size:1.1rem}
-  .leaderboard-table th,.leaderboard-table td{padding:.5rem .6rem}
-  .leaderboard-table th{font-size:.52rem}
+  .leaderboard-table th,.leaderboard-table td{padding:.5rem .5rem}
+  .leaderboard-table th{font-size:.5rem}
   .admin-panel{padding:1rem .75rem}
+  .bracket-col{min-width:200px}
 }
 `;
 
 // ═══════════════════════════════════════════════════════════════
-// COUNTDOWN SECTION
+// TOURNAMENT PROGRESS STEPS
 // ═══════════════════════════════════════════════════════════════
-function CountdownSection({ onGoRegister }) {
-  // Countdown counts DOWN to registration CLOSE (not open)
-  // Registration is always open; countdown shows how long is left
-  const time = useCountdown(TOURNAMENT_CLOSE_DATE);
-  if (!time) return null;
+function TournamentProgress({ currentStage }) {
+  const idx = stageIndex(currentStage);
+  const steps = [...ROUND_ORDER, "Champion"];
+  return (
+    <div className="progress-track">
+      {steps.map((label, i) => {
+        const state = i < idx ? "done" : i === idx ? "live" : "upcoming";
+        return (
+          <div key={label} style={{ display: "flex", alignItems: "flex-start" }}>
+            <div className={`progress-step ${state}`}>
+              <div className="progress-dot">{state === "done" ? "✓" : state === "live" ? "●" : "○"}</div>
+              <div className="progress-label">{label}</div>
+            </div>
+            {i < steps.length - 1 && <div className={`progress-connector ${i < idx ? "done" : ""}`} />}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
-  const regStillOpen = !time.done;
+// ═══════════════════════════════════════════════════════════════
+// HERO SECTION (replaces the old "Registration Closed" landing)
+// ═══════════════════════════════════════════════════════════════
+function HeroSection({ matches, tournamentMeta, onNavigate }) {
+  const currentStage = tournamentMeta?.currentStage || "Group Stage";
+  const isCompleted = currentStage === "Completed";
+  const liveMatch = matches.find(m => m.status === "live");
+  const upcoming = matches.filter(m => m.status === "upcoming")[0];
+
+  const finalMatch = matches.find(m => m.round === "Final" && m.status === "finished" && m.winnerName);
+  const champion = isCompleted && finalMatch ? finalMatch.winnerName : null;
 
   return (
     <div className="landing">
-      <div className="badge green">
-        <span style={{width:6,height:6,borderRadius:'50%',background:'var(--ng)',display:'inline-block',animation:'pb 1s infinite'}} />
-        SEASON 2026
+      <div className={`badge ${isCompleted ? "gold" : "green"}`}>
+        <span style={{ width: 6, height: 6, borderRadius: "50%", background: isCompleted ? "var(--gold)" : "var(--ng)", display: "inline-block", animation: "pb 1s infinite" }} />
+        {isCompleted ? "TOURNAMENT COMPLETE" : "LIVE TOURNAMENT"}
       </div>
 
       <div>
         <div className="main-title">eFootball</div>
-        <div className="main-title" style={{fontSize:'clamp(1rem,2.8vw,2.2rem)',letterSpacing:'.22em',marginTop:'.2rem'}}>
+        <div className="main-title" style={{ fontSize: "clamp(1rem,2.8vw,2.2rem)", letterSpacing: ".22em", marginTop: ".2rem" }}>
           ROUTE-7 TOURNAMENT
         </div>
       </div>
 
       <div className="subtitle">Battle · Compete · Become Champion</div>
 
-      {/* Always show countdown — now it's "Registration closes in" */}
-      {regStillOpen ? (
-        <>
-          <div style={{color:'var(--ts)',fontSize:'.72rem',fontFamily:"'Orbitron',monospace",letterSpacing:'.15em',textAlign:'center'}}>
-            REGISTRATION CLOSES IN
-          </div>
-          <div className="countdown">
-            {[{v:time.d,l:'Days'},{v:time.h,l:'Hours'},{v:time.m,l:'Minutes'},{v:time.s,l:'Seconds'}].map(({v,l},i,arr)=>(
-              <div key={l} style={{display:'flex',alignItems:'center',gap:'1rem'}}>
-                <div className="count-box" style={{display:'flex',flexDirection:'column',alignItems:'center',gap:0}}>
-                  <div className="count-number">{pad(v)}</div>
-                  <div className="count-label">{l}</div>
-                </div>
-                {i < arr.length-1 && <div className="count-sep">:</div>}
+      {champion ? (
+        <div className="champion-banner">
+          <div className="champion-trophy">🏆</div>
+          <div className="champion-name">{champion}</div>
+          <div style={{ color: "var(--ts)", fontSize: ".78rem", marginTop: ".4rem" }}>2026 Champion</div>
+        </div>
+      ) : (
+        <div className="stage-callout">Current Stage: {currentStage}</div>
+      )}
+
+      <TournamentProgress currentStage={currentStage} />
+
+      {!champion && (
+        <div className="hero-preview">
+          {liveMatch ? (
+            <>
+              <div className="hero-preview-label"><span style={{ color: "var(--lr)" }}>🔴</span> Live Now · {liveMatch.round}</div>
+              <div className="hero-preview-row">
+                <div className="hero-preview-name">{liveMatch.player1}</div>
+                <div className="hero-preview-score">{liveMatch.score1} — {liveMatch.score2}</div>
+                <div className="hero-preview-name">{liveMatch.player2}</div>
               </div>
-            ))}
-          </div>
-        </>
-      ) : (
-        <div className="reg-closed-notice">⛔ Registration has closed</div>
+            </>
+          ) : upcoming ? (
+            <>
+              <div className="hero-preview-label">Next Match · {upcoming.round}</div>
+              <div className="hero-preview-row">
+                <div className="hero-preview-name">{upcoming.player1}</div>
+                <div style={{ color: "var(--tm)", fontFamily: "'Orbitron',monospace", fontSize: ".75rem" }}>VS</div>
+                <div className="hero-preview-name">{upcoming.player2}</div>
+              </div>
+            </>
+          ) : (
+            <div className="hero-preview-empty">No live matches right now.</div>
+          )}
+        </div>
       )}
 
-      <div className="urgency">
-        <div className="urgency-dot" />
-        Limited slots available — 32 players only
+      <div className="hero-cta-row">
+        <button className="btn-cta primary" onClick={() => onNavigate("tournament")}>View Tournament</button>
+        <button className="btn-cta" onClick={() => onNavigate("bracket")}>Bracket</button>
+        <button className="btn-cta" onClick={() => onNavigate("tournament")}>Leaderboard</button>
+        <button className="btn-cta" onClick={() => onNavigate("register")}>Register</button>
       </div>
-
-      {regStillOpen ? (
-        <>
-          <button className="btn-register active" onClick={onGoRegister}>
-            ⚡ Register Now
-          </button>
-          <div className="reg-open-hint">
-            Registration is <strong style={{color:'var(--ng)'}}>OPEN</strong>. Click above or the{' '}
-            <strong style={{color:'var(--ng)'}}>Register</strong> tab to secure your spot.
-          </div>
-        </>
-      ) : (
-        <button className="btn-register closed" disabled>🔒 Registration Closed</button>
-      )}
     </div>
   );
 }
 
 // ═══════════════════════════════════════════════════════════════
-// REGISTRATION SECTION
+// REGISTRATION SECTION (unchanged logic, still gated by the date)
 // ═══════════════════════════════════════════════════════════════
 function RegistrationSection({ players, onRegister }) {
   const time = useCountdown(TOURNAMENT_CLOSE_DATE);
@@ -524,20 +660,18 @@ function RegistrationSection({ players, onRegister }) {
 
   const slotPct = Math.min((players.length/32)*100, 100);
 
-  // Registration closed
   if (!regOpen) {
     return (
       <div className="form-container" style={{paddingTop:'3rem'}}>
         <div style={{textAlign:'center',padding:'4rem 2rem',color:'var(--ts)'}}>
           <div style={{fontSize:'3rem',marginBottom:'1rem'}}>🔒</div>
           <div style={{fontFamily:"'Orbitron',monospace",fontSize:'.9rem',letterSpacing:'.1em',color:'var(--tm)',textTransform:'uppercase'}}>Registration Closed</div>
-          <div style={{fontSize:'.8rem',marginTop:'.65rem'}}>The registration deadline has passed. Stay tuned for the next season!</div>
+          <div style={{fontSize:'.8rem',marginTop:'.65rem'}}>The registration deadline has passed. The tournament bracket is already underway — check the Tournament and Bracket tabs for live progress.</div>
         </div>
       </div>
     );
   }
 
-  // Tournament full
   if (players.length >= 32) {
     return (
       <div className="form-container" style={{paddingTop:'3rem'}}>
@@ -579,6 +713,21 @@ function RegistrationSection({ players, onRegister }) {
 
   return (
     <div id="register-section" className="form-container" style={{paddingTop:'1.75rem'}}>
+      <div style={{textAlign:'center',marginBottom:'1.25rem'}}>
+        <div style={{color:'var(--ts)',fontSize:'.72rem',fontFamily:"'Orbitron',monospace",letterSpacing:'.1em',textTransform:'uppercase'}}>Registration closes in</div>
+        <div className="countdown" style={{marginTop:'.75rem'}}>
+          {time && [{v:time.d,l:'Days'},{v:time.h,l:'Hours'},{v:time.m,l:'Minutes'},{v:time.s,l:'Seconds'}].map(({v,l},i,arr)=>(
+            <div key={l} style={{display:'flex',alignItems:'center',gap:'.6rem'}}>
+              <div className="count-box" style={{display:'flex',flexDirection:'column',alignItems:'center',gap:0,minWidth:56,padding:'.5rem .7rem'}}>
+                <div className="count-number" style={{fontSize:'1.3rem'}}>{pad(v)}</div>
+                <div className="count-label" style={{fontSize:'.48rem'}}>{l}</div>
+              </div>
+              {i < arr.length-1 && <div className="count-sep" style={{fontSize:'1.3rem'}}>:</div>}
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="form-card">
         <div className="corner-deco tl"/><div className="corner-deco tr"/>
         <div className="corner-deco bl"/><div className="corner-deco br"/>
@@ -589,7 +738,6 @@ function RegistrationSection({ players, onRegister }) {
           Registration closes when the countdown ends or all 32 slots are filled.
         </div>
 
-        {/* Personal info */}
         <div className="form-row">
           <div className="field">
             <label>Full Name</label>
@@ -623,7 +771,6 @@ function RegistrationSection({ players, onRegister }) {
 
         <div className="divider" />
 
-        {/* bKash payment section */}
         <div className="bkash-section">
           <div className="bkash-label-row">
             <span className="bkash-icon">💳</span>
@@ -676,12 +823,11 @@ function RegistrationSection({ players, onRegister }) {
 function LiveMatchCard({ match }) {
   const timer = useMatchTimer(match?.status === 'live');
   if (!match) return null;
-  const initials = name => name.split(' ').map(w=>w[0]||'').join('').slice(0,2).toUpperCase();
   return (
     <div className="live-match-card">
       <div style={{display:'flex',alignItems:'center',gap:'.65rem',flexWrap:'wrap',marginBottom:'.5rem'}}>
         <div className="badge red">🔴 LIVE</div>
-        <div style={{color:'var(--ts)',fontSize:'.72rem',fontFamily:"'Orbitron',monospace",letterSpacing:'.08em'}}>{match.round}</div>
+        <div style={{color:'var(--ts)',fontSize:'.72rem',fontFamily:"'Orbitron',monospace",letterSpacing:'.08em'}}>{match.round}{match.matchNumber ? ` · Match #${match.matchNumber}` : ''}</div>
         <div className="match-timer-badge">⏱ {timer}</div>
       </div>
       <div className="match-players">
@@ -704,75 +850,155 @@ function LiveMatchCard({ match }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// TOURNAMENT SECTION
+// MATCH CENTER: Live Now / Upcoming / Recent Results
 // ═══════════════════════════════════════════════════════════════
-function TournamentSection({ matches, players }) {
-  const liveMatch = matches.find(m => m.status === 'live');
-
-  const lb = {};
-  matches.filter(m=>m.status==='finished').forEach(m=>{
-    [m.player1,m.player2].forEach((p,i)=>{
-      if(!lb[p]) lb[p]={name:p,played:0,wins:0,goals:0,points:0};
-      lb[p].played++;
-      lb[p].goals += i===0 ? m.score1 : m.score2;
-      const my = i===0?m.score1:m.score2, op = i===0?m.score2:m.score1;
-      if(my>op){lb[p].wins++;lb[p].points+=3;} else if(my===op){lb[p].points+=1;}
-    });
-  });
-  const leaderboard = Object.values(lb).sort((a,b)=>b.points-a.points||b.goals-a.goals);
+function MatchCenter({ matches }) {
+  const live = matches.filter(m => m.status === 'live');
+  const upcoming = matches.filter(m => m.status === 'upcoming');
+  const recent = matches.filter(m => m.status === 'finished').slice(-6).reverse();
 
   return (
-    <div className="dashboard">
-      {liveMatch && (
-        <>
-          <div className="section-title">Currently Live</div>
-          <LiveMatchCard match={liveMatch} />
-        </>
-      )}
+    <>
+      <div className="section-title">Live Now</div>
+      {live.length === 0
+        ? <div className="empty-state" style={{marginBottom:'1.75rem'}}>No live matches right now.</div>
+        : live.map(m => <LiveMatchCard key={m.id} match={m} />)
+      }
 
-      <div className="section-title">All Matches</div>
+      <div className="section-title">Upcoming</div>
       <div className="matches-grid">
-        {matches.length === 0 && <div className="empty-state">No matches scheduled yet</div>}
-        {matches.map(m => (
-          <div key={m.id} className={`match-row ${m.status}`}>
-            <div>
-              <div className="match-player-name">{m.player1}</div>
-              <div style={{fontSize:'.62rem',color:'var(--tm)',marginTop:'2px'}}>{m.round}</div>
-            </div>
-            <div className="match-score-inline">
-              {m.status==='upcoming' ? <span style={{color:'var(--tm)',fontSize:'.78rem'}}>vs</span> : `${m.score1} - ${m.score2}`}
-            </div>
+        {upcoming.length === 0 && <div className="empty-state">Upcoming matches will appear here.</div>}
+        {upcoming.map(m => (
+          <div key={m.id} className="match-row upcoming">
+            <div className="match-player-name">{m.player1}</div>
+            <div className="match-score-inline"><span style={{color:'var(--tm)',fontSize:'.78rem'}}>vs</span></div>
             <div className="match-player-name" style={{textAlign:'right'}}>{m.player2}</div>
-            <div className={`status-pill ${m.status}`}>
-              {m.status==='live'?'🔴 LIVE':m.status==='finished'?'✓ Done':'Upcoming'}
-            </div>
+            <div className="status-pill upcoming">{m.round}</div>
           </div>
         ))}
       </div>
 
-      <div className="section-title">Leaderboard</div>
-      <div className="leaderboard-card">
-        {leaderboard.length === 0
-          ? <div className="empty-state" style={{padding:'2rem'}}>No completed matches yet</div>
-          : (
+      <div className="section-title">Recent Results</div>
+      <div className="matches-grid" style={{marginBottom:'1.75rem'}}>
+        {recent.length === 0 && <div className="empty-state">No completed matches yet.</div>}
+        {recent.map(m => (
+          <div key={m.id} className="match-row finished">
+            <div className="match-player-name" style={{color: m.winnerName===m.player1 ? '#fff':undefined}}>{m.player1}</div>
+            <div className="match-score-inline">{m.score1} - {m.score2}{m.penalties1!=null ? ` (${m.penalties1}-${m.penalties2} pens)` : ''}</div>
+            <div className="match-player-name" style={{textAlign:'right',color: m.winnerName===m.player2 ? '#fff':undefined}}>{m.player2}</div>
+            <div className="status-pill finished">{m.round}</div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GROUP STANDINGS (fixed: draws, losses, GA, GD — group stage only)
+// ═══════════════════════════════════════════════════════════════
+function GroupStandings({ matches }) {
+  const lb = {};
+  matches.filter(m => m.status === 'finished' && m.round === 'Group Stage').forEach(m => {
+    [m.player1, m.player2].forEach((p, i) => {
+      if (!lb[p]) lb[p] = { name:p, played:0, wins:0, draws:0, losses:0, gf:0, ga:0, points:0 };
+      const my = i===0 ? m.score1 : m.score2;
+      const op = i===0 ? m.score2 : m.score1;
+      lb[p].played++;
+      lb[p].gf += my;
+      lb[p].ga += op;
+      if (my > op) { lb[p].wins++; lb[p].points += 3; }
+      else if (my === op) { lb[p].draws++; lb[p].points += 1; }
+      else { lb[p].losses++; }
+    });
+  });
+  const table = Object.values(lb).sort((a,b) => b.points - a.points || (b.gf-b.ga) - (a.gf-a.ga) || b.gf - a.gf);
+
+  return (
+    <div className="leaderboard-card">
+      {table.length === 0
+        ? <div className="empty-state" style={{padding:'2rem'}}>No completed group-stage matches yet</div>
+        : (
+          <div className="table-scroll">
             <table className="leaderboard-table">
-              <thead><tr><th>#</th><th>Player</th><th>MP</th><th>W</th><th>GF</th><th>Pts</th></tr></thead>
+              <thead><tr><th>#</th><th>Player</th><th>MP</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>Pts</th></tr></thead>
               <tbody>
-                {leaderboard.map((p,i) => (
+                {table.map((p,i) => (
                   <tr key={p.name}>
                     <td><span className={`rank-num ${i===0?'rank-1':i===1?'rank-2':i===2?'rank-3':''}`}>{i+1}</span></td>
                     <td><span className="lb-name">{p.name}</span></td>
                     <td><span className="lb-num">{p.played}</span></td>
                     <td><span className="lb-num">{p.wins}</span></td>
-                    <td><span className="lb-num">{p.goals}</span></td>
+                    <td><span className="lb-num">{p.draws}</span></td>
+                    <td><span className="lb-num">{p.losses}</span></td>
+                    <td><span className="lb-num">{p.gf-p.ga>0?'+':''}{p.gf-p.ga}</span></td>
                     <td><span className="lb-num lb-points">{p.points}</span></td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          )
-        }
-      </div>
+          </div>
+        )
+      }
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TOURNAMENT SECTION (Match Center + Group Standings)
+// ═══════════════════════════════════════════════════════════════
+function TournamentSection({ matches }) {
+  return (
+    <div className="dashboard">
+      <MatchCenter matches={matches} />
+      <div className="section-title">Group Stage Standings</div>
+      <GroupStandings matches={matches} />
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// BRACKET VIEW (Round of 12 → Final), mobile-scrollable columns
+// ═══════════════════════════════════════════════════════════════
+function BracketView({ matches }) {
+  const hasAnyKnockout = KNOCKOUT_ROUNDS.some(r => matches.some(m => m.round === r));
+
+  return (
+    <div className="dashboard">
+      <div className="section-title">Knockout Bracket</div>
+      {!hasAnyKnockout ? (
+        <div className="empty-state">Knockout matches will appear here once the bracket is set up in Admin.</div>
+      ) : (
+        <div className="bracket-scroll">
+          {KNOCKOUT_ROUNDS.map(round => {
+            const roundMatches = matches
+              .filter(m => m.round === round)
+              .sort((a,b) => (a.matchNumber||0) - (b.matchNumber||0));
+            return (
+              <div className="bracket-col" key={round}>
+                <div className="bracket-col-title">{round}</div>
+                {roundMatches.length === 0
+                  ? <div className="bracket-empty-col">TBD</div>
+                  : roundMatches.map(m => (
+                    <div key={m.id} className={`bracket-match ${m.status}`}>
+                      {m.matchNumber && <div className="bracket-match-num">Match #{m.matchNumber}</div>}
+                      <div className={`bracket-player-row ${m.winnerName===m.player1?'winner':''}`}>
+                        <span className="bracket-player-name">{m.player1 || 'TBD'}</span>
+                        {m.status!=='upcoming' && <span className="bracket-player-score">{m.score1}</span>}
+                      </div>
+                      <div className={`bracket-player-row ${m.winnerName===m.player2?'winner':''}`}>
+                        <span className="bracket-player-name">{m.player2 || 'TBD'}</span>
+                        {m.status!=='upcoming' && <span className="bracket-player-score">{m.score2}</span>}
+                      </div>
+                      {m.status==='live' && <div className="status-pill live" style={{marginTop:'.5rem'}}>🔴 LIVE</div>}
+                    </div>
+                  ))
+                }
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -782,11 +1008,72 @@ function TournamentSection({ matches, players }) {
 // ═══════════════════════════════════════════════════════════════
 const ADMIN_PASSWORD = "adminadmin123";
 
-function AdminSection({ matches, players, onUpdateMatch, onAddMatch, onDeleteMatch }) {
+function AdvanceControl({ match, matches, onUpdateMatch }) {
+  const nextRound = nextRoundOf(match.round);
+  const candidates = nextRound ? matches.filter(m => m.round === nextRound) : [];
+  if (!nextRound) return null; // Final has no "next"
+
+  return (
+    <div className="advance-row">
+      <label>Advances to</label>
+      <select className="add-match-input" style={{width:'auto',padding:'.4rem .6rem',fontSize:'.72rem'}}
+        value={match.nextMatchId || ''}
+        onChange={e => onUpdateMatch(match.id, { nextMatchId: e.target.value || null })}>
+        <option value="">— none yet —</option>
+        {candidates.map(c => <option key={c.id} value={c.id}>{nextRound} · {c.player1||'TBD'} vs {c.player2||'TBD'} {c.matchNumber?`(#${c.matchNumber})`:''}</option>)}
+      </select>
+      <select className="add-match-input" style={{width:'auto',padding:'.4rem .6rem',fontSize:'.72rem'}}
+        value={match.nextMatchSlot || ''}
+        onChange={e => onUpdateMatch(match.id, { nextMatchSlot: e.target.value || null })}
+        disabled={!match.nextMatchId}>
+        <option value="">Slot</option>
+        <option value="player1">Player 1 slot</option>
+        <option value="player2">Player 2 slot</option>
+      </select>
+    </div>
+  );
+}
+
+function ConfirmWinnerControl({ match, onConfirmWinner }) {
+  const [pen1, setPen1] = useState('');
+  const [pen2, setPen2] = useState('');
+  const isTied = match.score1 === match.score2;
+
+  if (match.winnerName) {
+    return <div className="winner-confirmed">🏆 Winner confirmed: {match.winnerName}{match.penalties1!=null ? ` (pens ${match.penalties1}-${match.penalties2})` : ''}</div>;
+  }
+  if (match.status !== 'finished') return null;
+
+  const canConfirm = !isTied || (pen1 !== '' && pen2 !== '' && Number(pen1) !== Number(pen2));
+
+  return (
+    <div className="confirm-winner-row">
+      <label style={{fontFamily:"'Orbitron',monospace",fontSize:'.62rem',color:'var(--gold)',letterSpacing:'.06em',textTransform:'uppercase'}}>Confirm Winner</label>
+      {isTied && (
+        <div className="penalty-inputs">
+          <input type="number" min="0" placeholder="P1" value={pen1} onChange={e=>setPen1(e.target.value)} />
+          <span style={{color:'var(--tm)'}}>-</span>
+          <input type="number" min="0" placeholder="P2" value={pen2} onChange={e=>setPen2(e.target.value)} />
+          <span style={{fontSize:'.62rem',color:'var(--ts)'}}>penalties</span>
+        </div>
+      )}
+      <button className="btn-action gold" disabled={!canConfirm}
+        onClick={() => onConfirmWinner(match, match.player1, isTied ? { penalties1:Number(pen1), penalties2:Number(pen2) } : {})}>
+        {match.player1.split(' ')[0]} Won
+      </button>
+      <button className="btn-action gold" disabled={!canConfirm}
+        onClick={() => onConfirmWinner(match, match.player2, isTied ? { penalties1:Number(pen1), penalties2:Number(pen2) } : {})}>
+        {match.player2.split(' ')[0]} Won
+      </button>
+    </div>
+  );
+}
+
+function AdminSection({ matches, players, tournamentMeta, onUpdateMatch, onAddMatch, onDeleteMatch, onConfirmWinner, onSetStage }) {
   const [authed, setAuthed] = useState(false);
   const [pw, setPw] = useState('');
   const [pwErr, setPwErr] = useState('');
-  const [newMatch, setNewMatch] = useState({ player1:'', player2:'', round:'Group Stage' });
+  const [newMatch, setNewMatch] = useState({ player1:'', player2:'', round:'Group Stage', matchNumber:'' });
 
   const login = () => {
     if (pw === ADMIN_PASSWORD) { setAuthed(true); setPwErr(''); }
@@ -816,6 +1103,16 @@ function AdminSection({ matches, players, onUpdateMatch, onAddMatch, onDeleteMat
         <button className="btn-action reset" style={{marginLeft:'auto'}} onClick={()=>setAuthed(false)}>Logout</button>
       </div>
 
+      {/* Tournament stage control */}
+      <div className="admin-stage-bar">
+        <label>Current Tournament Stage</label>
+        <select className="add-match-input" style={{width:'auto'}} value={tournamentMeta?.currentStage || 'Group Stage'}
+          onChange={e => onSetStage(e.target.value)}>
+          {[...ROUND_ORDER, 'Completed'].map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <span style={{fontSize:'.68rem',color:'var(--ts)'}}>Drives the "Current Stage" shown on the landing page and progress bar.</span>
+      </div>
+
       {/* Players */}
       <div className="section-title">Registered Players ({players.length} / 32)</div>
       {players.length === 0
@@ -837,19 +1134,27 @@ function AdminSection({ matches, players, onUpdateMatch, onAddMatch, onDeleteMat
       <div className="section-title">Add Match</div>
       <div className="admin-add-match">
         <div className="add-match-grid">
-          <input className="add-match-input" placeholder="Player 1 Name" value={newMatch.player1} onChange={e=>setNewMatch(n=>({...n,player1:e.target.value}))} />
-          <input className="add-match-input" placeholder="Player 2 Name" value={newMatch.player2} onChange={e=>setNewMatch(n=>({...n,player2:e.target.value}))} />
+          <input className="add-match-input" placeholder="Player 1 Name (or leave blank for TBD)" value={newMatch.player1} onChange={e=>setNewMatch(n=>({...n,player1:e.target.value}))} />
+          <input className="add-match-input" placeholder="Player 2 Name (or leave blank for TBD)" value={newMatch.player2} onChange={e=>setNewMatch(n=>({...n,player2:e.target.value}))} />
         </div>
         <div className="add-match-grid">
           <select className="add-match-input" value={newMatch.round} onChange={e=>setNewMatch(n=>({...n,round:e.target.value}))}>
-            {['Group Stage','Quarter Final','Semi Final','Final'].map(r=><option key={r}>{r}</option>)}
+            {ROUND_ORDER.map(r=><option key={r}>{r}</option>)}
           </select>
-          <button className="btn-add" onClick={()=>{
-            if(!newMatch.player1.trim()||!newMatch.player2.trim()) return;
-            onAddMatch({...newMatch,score1:0,score2:0,status:'upcoming'});
-            setNewMatch({player1:'',player2:'',round:'Group Stage'});
-          }}>+ Add Match</button>
+          <input className="add-match-input" type="number" min="1" placeholder="Match # (optional)" value={newMatch.matchNumber} onChange={e=>setNewMatch(n=>({...n,matchNumber:e.target.value}))} />
         </div>
+        <button className="btn-add" onClick={()=>{
+          onAddMatch({
+            player1: newMatch.player1.trim() || 'TBD',
+            player2: newMatch.player2.trim() || 'TBD',
+            round: newMatch.round,
+            matchNumber: newMatch.matchNumber ? Number(newMatch.matchNumber) : null,
+            score1:0, score2:0, status:'upcoming',
+            winnerName:null, nextMatchId:null, nextMatchSlot:null,
+            penalties1:null, penalties2:null,
+          });
+          setNewMatch({player1:'',player2:'',round:newMatch.round,matchNumber:''});
+        }}>+ Add Match</button>
       </div>
 
       {/* Manage matches */}
@@ -860,14 +1165,13 @@ function AdminSection({ matches, players, onUpdateMatch, onAddMatch, onDeleteMat
           <div className="admin-match-header">
             <div>
               <div className="admin-match-name">{m.player1} vs {m.player2}</div>
-              <div style={{color:'var(--tm)',fontSize:'.67rem',marginTop:'2px'}}>{m.round}</div>
+              <div style={{color:'var(--tm)',fontSize:'.67rem',marginTop:'2px'}}>{m.round}{m.matchNumber?` · #${m.matchNumber}`:''}</div>
             </div>
             <div className={`status-pill ${m.status}`}>
-              {m.status==='live'?'🔴 LIVE':m.status==='finished'?'✓ DONE':'UPCOMING'}
+              {m.status==='live'?'🔴 LIVE':m.status==='finished'?'✓ DONE':m.status==='postponed'?'⏸ POSTPONED':m.status==='disputed'?'⚠ DISPUTED':'UPCOMING'}
             </div>
           </div>
           <div className="admin-controls">
-            {/* Score p1 */}
             <div className="admin-score-control">
               <span className="score-label">{m.player1.split(' ')[0]}</span>
               <button className="btn-icon" onClick={()=>onUpdateMatch(m.id,{score1:Math.max(0,m.score1-1)})}>−</button>
@@ -875,21 +1179,24 @@ function AdminSection({ matches, players, onUpdateMatch, onAddMatch, onDeleteMat
               <button className="btn-icon" onClick={()=>onUpdateMatch(m.id,{score1:m.score1+1})}>+</button>
             </div>
             <span style={{color:'var(--tm)',fontFamily:"'Orbitron',monospace",fontSize:'.9rem'}}>:</span>
-            {/* Score p2 */}
             <div className="admin-score-control">
               <button className="btn-icon" onClick={()=>onUpdateMatch(m.id,{score2:Math.max(0,m.score2-1)})}>−</button>
               <div className="admin-score-val">{m.score2}</div>
               <button className="btn-icon" onClick={()=>onUpdateMatch(m.id,{score2:m.score2+1})}>+</button>
               <span className="score-label" style={{textAlign:'right'}}>{m.player2.split(' ')[0]}</span>
             </div>
-            {/* Actions */}
             <div style={{marginLeft:'auto',display:'flex',gap:'.45rem',flexWrap:'wrap'}}>
               {m.status==='upcoming' && <button className="btn-action start" onClick={()=>onUpdateMatch(m.id,{status:'live'})}>▶ Start</button>}
               {m.status==='live'     && <button className="btn-action finish" onClick={()=>onUpdateMatch(m.id,{status:'finished'})}>✓ End</button>}
-              {m.status==='finished' && <button className="btn-action reset"  onClick={()=>onUpdateMatch(m.id,{status:'upcoming',score1:0,score2:0})}>↺ Reset</button>}
+              {(m.status==='upcoming'||m.status==='live') && <button className="btn-action postpone" onClick={()=>onUpdateMatch(m.id,{status:'postponed'})}>⏸ Postpone</button>}
+              {m.status==='finished' && !m.winnerName && <button className="btn-action dispute" onClick={()=>onUpdateMatch(m.id,{status:'disputed'})}>⚠ Dispute</button>}
+              {(m.status==='finished'||m.status==='postponed'||m.status==='disputed') && <button className="btn-action reset" onClick={()=>onUpdateMatch(m.id,{status:'upcoming',score1:0,score2:0,winnerName:null,penalties1:null,penalties2:null})}>↺ Reset</button>}
               <button className="btn-action reset" style={{color:'var(--lr)',borderColor:'rgba(255,45,85,.3)'}} onClick={()=>onDeleteMatch(m.id)}>✕</button>
             </div>
           </div>
+
+          {m.round !== 'Group Stage' && <ConfirmWinnerControl match={m} onConfirmWinner={onConfirmWinner} />}
+          {KNOCKOUT_ROUNDS.includes(m.round) && <AdvanceControl match={m} matches={matches} onUpdateMatch={onUpdateMatch} />}
         </div>
       ))}
     </div>
@@ -903,12 +1210,14 @@ export default function App() {
   const [tab, setTab] = useState('home');
   const [players, setPlayers] = useState([]);
   const [matches, setMatches] = useState([]);
+  const [tournamentMeta, setTournamentMeta] = useState({ currentStage: 'Group Stage' });
 
   // Firebase real-time listeners
   useEffect(() => {
     if (DEMO_MODE) {
       setPlayers(DEMO_PLAYERS);
       setMatches(DEMO_MATCHES);
+      setTournamentMeta(DEMO_META);
       return;
     }
     const unsubPlayers = onSnapshot(collection(db,'players'), snap => {
@@ -919,7 +1228,13 @@ export default function App() {
       setMatches(snap.docs.map(d=>({id:d.id,...d.data()})));
     }, err=>console.error('Matches error:',err));
 
-    return () => { unsubPlayers(); unsubMatches(); };
+    // Single settings doc drives the landing page's "current stage".
+    // If it doesn't exist yet, we keep the default above — nothing breaks.
+    const unsubMeta = onSnapshot(doc(db,'settings','tournament'), snap => {
+      if (snap.exists()) setTournamentMeta(snap.data());
+    }, err=>console.error('Tournament meta error:',err));
+
+    return () => { unsubPlayers(); unsubMatches(); unsubMeta(); };
   }, []);
 
   const registerPlayer = async (data) => {
@@ -942,10 +1257,31 @@ export default function App() {
     await deleteDoc(doc(db,'matches',id));
   };
 
-  const liveCount = matches.filter(m=>m.status==='live').length;
+  // Confirms a winner on a finished match and, if this match feeds into a
+  // next-round match (nextMatchId/nextMatchSlot set by the admin), fills
+  // that slot automatically — this is the "auto-advance" engine.
+  const confirmMatchWinner = async (match, winnerName, extra = {}) => {
+    const patch = { winnerName, ...extra };
+    if (DEMO_MODE) {
+      setMatches(ms => ms.map(m => m.id===match.id ? {...m,...patch} : m));
+      if (match.nextMatchId && match.nextMatchSlot) {
+        setMatches(ms => ms.map(m => m.id===match.nextMatchId ? {...m,[match.nextMatchSlot]:winnerName} : m));
+      }
+      return;
+    }
+    await updateDoc(doc(db,'matches',match.id), patch);
+    if (match.nextMatchId && match.nextMatchSlot) {
+      await updateDoc(doc(db,'matches',match.nextMatchId), { [match.nextMatchSlot]: winnerName });
+    }
+  };
 
-  // ── Go to register tab (used by home button) ──
-  const goToRegister = () => setTab('register');
+  const setStage = async (stage) => {
+    if (DEMO_MODE) { setTournamentMeta({ currentStage: stage }); return; }
+    await setDoc(doc(db,'settings','tournament'), { currentStage: stage }, { merge: true });
+  };
+
+  const liveCount = matches.filter(m=>m.status==='live').length;
+  const goTo = (t) => setTab(t);
 
   return (
     <>
@@ -958,8 +1294,9 @@ export default function App() {
         <div className="nav-tabs">
           {[
             ['home','Home'],
+            ['tournament','Tournament'],
+            ['bracket','Bracket'],
             ['register','Register'],
-            ['tournament','Live'],
             ['admin','Admin'],
           ].map(([id,label]) => (
             <button
@@ -975,10 +1312,22 @@ export default function App() {
       </nav>
 
       <main className="main">
-        {tab==='home'       && <CountdownSection onGoRegister={goToRegister} />}
+        {tab==='home'       && <HeroSection matches={matches} tournamentMeta={tournamentMeta} onNavigate={goTo} />}
         {tab==='register'   && <RegistrationSection players={players} onRegister={registerPlayer} />}
-        {tab==='tournament' && <TournamentSection matches={matches} players={players} />}
-        {tab==='admin'      && <AdminSection matches={matches} players={players} onUpdateMatch={updateMatch} onAddMatch={addMatch} onDeleteMatch={deleteMatch} />}
+        {tab==='tournament' && <TournamentSection matches={matches} />}
+        {tab==='bracket'    && <BracketView matches={matches} />}
+        {tab==='admin'      && (
+          <AdminSection
+            matches={matches}
+            players={players}
+            tournamentMeta={tournamentMeta}
+            onUpdateMatch={updateMatch}
+            onAddMatch={addMatch}
+            onDeleteMatch={deleteMatch}
+            onConfirmWinner={confirmMatchWinner}
+            onSetStage={setStage}
+          />
+        )}
       </main>
     </>
   );
