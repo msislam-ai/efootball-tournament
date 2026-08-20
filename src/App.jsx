@@ -136,6 +136,28 @@ body { font-family:'Exo 2',sans-serif; background:var(--dbg); color:var(--tp); m
 .nav-tab.admin-tab{border-color:rgba(179,71,255,.5);color:var(--np)}
 .nav-tab.admin-tab.active{background:rgba(179,71,255,.1);box-shadow:var(--gp)}
 
+
+/* see all Button */
+
+.see-all-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--tm);
+  padding: 7px 14px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.see-all-btn:hover {
+  background: var(--tm);
+  color: #000;
+  border-color: var(--tm);
+  transform: translateY(-1px);
+}
+
 /* ── MAIN ── */
 .main{position:relative;z-index:2}
 
@@ -853,43 +875,112 @@ function LiveMatchCard({ match }) {
 // MATCH CENTER: Live Now / Upcoming / Recent Results
 // ═══════════════════════════════════════════════════════════════
 function MatchCenter({ matches }) {
+  const [showAll, setShowAll] = React.useState(false);
+
   const live = matches.filter(m => m.status === 'live');
   const upcoming = matches.filter(m => m.status === 'upcoming');
-  const recent = matches.filter(m => m.status === 'finished').slice(-6).reverse();
+  const finished = matches.filter(m => m.status === 'finished');
+
+  const recent = finished.slice(-6).reverse();
+
+  const displayedUpcoming = showAll ? upcoming : upcoming.slice(0, 6);
+  const displayedRecent = showAll ? finished.slice().reverse() : recent;
 
   return (
     <>
       <div className="section-title">Live Now</div>
-      {live.length === 0
-        ? <div className="empty-state" style={{marginBottom:'1.75rem'}}>No live matches right now.</div>
-        : live.map(m => <LiveMatchCard key={m.id} match={m} />)
-      }
+
+      {live.length === 0 ? (
+        <div className="empty-state" style={{ marginBottom: '1.75rem' }}>
+          No live matches right now.
+        </div>
+      ) : (
+        live.map(m => <LiveMatchCard key={m.id} match={m} />)
+      )}
 
       <div className="section-title">Upcoming</div>
+
       <div className="matches-grid">
-        {upcoming.length === 0 && <div className="empty-state">Upcoming matches will appear here.</div>}
-        {upcoming.map(m => (
+        {displayedUpcoming.length === 0 && (
+          <div className="empty-state">
+            Upcoming matches will appear here.
+          </div>
+        )}
+
+        {displayedUpcoming.map(m => (
           <div key={m.id} className="match-row upcoming">
             <div className="match-player-name">{m.player1}</div>
-            <div className="match-score-inline"><span style={{color:'var(--tm)',fontSize:'.78rem'}}>vs</span></div>
-            <div className="match-player-name" style={{textAlign:'right'}}>{m.player2}</div>
+
+            <div className="match-score-inline">
+              <span style={{ color: 'var(--tm)', fontSize: '.78rem' }}>
+                vs
+              </span>
+            </div>
+
+            <div
+              className="match-player-name"
+              style={{ textAlign: 'right' }}
+            >
+              {m.player2}
+            </div>
+
             <div className="status-pill upcoming">{m.round}</div>
           </div>
         ))}
       </div>
 
       <div className="section-title">Recent Results</div>
-      <div className="matches-grid" style={{marginBottom:'1.75rem'}}>
-        {recent.length === 0 && <div className="empty-state">No completed matches yet.</div>}
-        {recent.map(m => (
+
+      <div className="matches-grid" style={{ marginBottom: '1rem' }}>
+        {displayedRecent.length === 0 && (
+          <div className="empty-state">
+            No completed matches yet.
+          </div>
+        )}
+
+        {displayedRecent.map(m => (
           <div key={m.id} className="match-row finished">
-            <div className="match-player-name" style={{color: m.winnerName===m.player1 ? '#fff':undefined}}>{m.player1}</div>
-            <div className="match-score-inline">{m.score1} - {m.score2}{m.penalties1!=null ? ` (${m.penalties1}-${m.penalties2} pens)` : ''}</div>
-            <div className="match-player-name" style={{textAlign:'right',color: m.winnerName===m.player2 ? '#fff':undefined}}>{m.player2}</div>
+            <div
+              className="match-player-name"
+              style={{
+                color: m.winnerName === m.player1 ? '#fff' : undefined
+              }}
+            >
+              {m.player1}
+            </div>
+
+            <div className="match-score-inline">
+              {m.score1} - {m.score2}
+              {m.penalties1 != null
+                ? ` (${m.penalties1}-${m.penalties2} pens)`
+                : ''}
+            </div>
+
+            <div
+              className="match-player-name"
+              style={{
+                textAlign: 'right',
+                color: m.winnerName === m.player2 ? '#fff' : undefined
+              }}
+            >
+              {m.player2}
+            </div>
+
             <div className="status-pill finished">{m.round}</div>
           </div>
         ))}
       </div>
+
+      {(upcoming.length > 6 || finished.length > 6) && (
+        <div style={{ textAlign: 'center', marginBottom: '1.75rem' }}>
+          <button
+            onClick={() => setShowAll(!showAll)}
+            className="see-all-btn"
+          >
+            {showAll ? 'Show Less ↑' : 'See All Matches →'}
+          </button>
+        </div>
+      )}
     </>
   );
 }
