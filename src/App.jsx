@@ -875,7 +875,7 @@ function LiveMatchCard({ match }) {
 // MATCH CENTER: Live Now / Upcoming / Recent Results
 // ═══════════════════════════════════════════════════════════════
 function MatchCenter({ matches }) {
-  const [showAll, setShowAll] = React.useState(false);
+  const [showAll, setShowAll] = useState(false);
 
   const live = matches.filter(m => m.status === 'live');
   const upcoming = matches.filter(m => m.status === 'upcoming');
