@@ -565,7 +565,9 @@ function HeroSection({ matches, tournamentMeta, onNavigate }) {
   const currentStage = tournamentMeta?.currentStage || "Group Stage";
   const isCompleted = currentStage === "Completed";
   const liveMatch = matches.find(m => m.status === "live");
-  const upcoming = matches.filter(m => m.status === "upcoming")[0];
+  const upcoming = matches
+  .filter(m => m.status === "upcoming")
+  .sort((a, b) => a.matchNumber - b.matchNumber)[0];
 
   const finalMatch = matches.find(m => m.round === "Final" && m.status === "finished" && m.winnerName);
   const champion = isCompleted && finalMatch ? finalMatch.winnerName : null;
